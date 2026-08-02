@@ -127,10 +127,9 @@ jobs:
       - name: Check for Lambda code changes
         id: check_lambda
         run: node scripts/check-lambda-changes.js
-        continue-on-error: true
 
       - name: Configure AWS credentials
-        if: steps.check_lambda.outcome == 'success'
+        if: steps.check_lambda.outputs.lambda_changes == 'true'
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
@@ -138,15 +137,13 @@ jobs:
           aws-region: ${{ secrets.AWS_REGION }}
 
       - name: Deploy Lambda functions
-        if: steps.check_lambda.outcome == 'success'
+        if: steps.check_lambda.outputs.lambda_changes == 'true'
         run: node scripts/deploy-lambdas.js
 
       - name: Write deployment summary
         if: always()
-        env:
-          LAMBDA_OUTCOME: ${{ steps.check_lambda.outcome }}
         run: |
-          if [ "$LAMBDA_OUTCOME" == "success" ]; then
+          if [ "${{ steps.check_lambda.outputs.lambda_changes }}" == "true" ]; then
             echo "### Lambda deployment successful ✅" >> $GITHUB_STEP_SUMMARY
           else
             echo "### Lambda deployment skipped ⏭️" >> $GITHUB_STEP_SUMMARY
