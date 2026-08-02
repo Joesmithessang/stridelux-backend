@@ -124,9 +124,17 @@ Change detection writes a `lambda_changes=true|false` step output. Unchanged fun
 | `AWS_REGION` | Deployment region |
 | `SONAR_TOKEN` | SonarCloud analysis token |
 
-### SonarQube Community Edition
+### Code Quality — Dual Analysis Strategy
 
-The workflow includes a dormant SonarQube block. To activate: add `SONAR_HOST_URL` to repo secrets, comment out the SonarCloud step, uncomment the SonarQube step.
+Two complementary static analysis approaches are in use:
+
+**SonarCloud (cloud-hosted — active)**
+Runs automatically on every pull request and push to `main`. Quality gate must pass before a PR can be merged. Free for public repositories.
+
+**SonarQube Community Edition (self-hosted — on-demand)**
+Set up on a forked repository of this codebase, backed by a self-hosted GitHub Actions runner on an EC2 instance. The EC2 is not continuously running — it is started on-demand when a targeted code scan is needed, then stopped. This keeps compute costs near zero while retaining the ability to run deep, on-demand analysis outside of the standard CI/CD pipeline.
+
+The workflow file includes a dormant SonarQube step (commented out). To route a scan through the self-hosted runner: start the EC2, add `SONAR_HOST_URL` to the forked repo secrets, comment out the SonarCloud step, and uncomment the SonarQube step.
 
 ---
 
