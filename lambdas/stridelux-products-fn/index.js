@@ -14,6 +14,11 @@ const client = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 const TABLE  = "stridelux-products";
 
 exports.handler = async (event) => {
+  // ── DR TEST ── Simulated failure for disaster recovery demonstration
+  // This line intentionally breaks the products API to prove rollback recovery.
+  // Recovery: git revert this commit → CI/CD redeploys the working version.
+  throw new Error("DR TEST: Simulated products-fn failure — recovery via git revert");
+
   const method     = event.requestContext?.http?.method || event.httpMethod;
   const pathParams = event.pathParameters || {};
   const qs         = event.queryStringParameters || {};
