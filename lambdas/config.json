@@ -1,0 +1,93 @@
+{
+  "description": "Lambda function configuration - maps directories to AWS Lambda function names for StrideLux e-commerce platform",
+  "functions": {
+    "products": {
+      "directory": "stridelux-products-fn",
+      "awsFunctionName": "stridelux-products-fn",
+      "handler": "index.handler",
+      "runtime": "nodejs22.x",
+      "description": "Product catalog CRUD — GET /products (public), GET /products/{id} (public), POST/PUT/DELETE /products (admin only). Reads/writes stridelux-products table. Handles category/brand/search/inStock filters, treats 'All' as no filter.",
+      "iamRole": "stridelux-products-fn-role",
+      "triggers": ["api-gateway"],
+      "npmInstall": false,
+      "bundledDependencies": []
+    },
+    "orders": {
+      "directory": "stridelux-orders-fn",
+      "awsFunctionName": "stridelux-orders-fn",
+      "handler": "index.handler",
+      "runtime": "nodejs22.x",
+      "description": "Order lifecycle for customers and admins — POST /orders, GET /orders (own orders, excludes pending_payment), GET /orders/{orderId}, GET /admin/orders (full scan), PUT /admin/orders/{orderId}/status. Valid statuses: pending, processing, shipped, out-for-delivery, delivered, cancelled. Reads/writes stridelux-orders, reads stridelux-products.",
+      "iamRole": "stridelux-orders-fn-role",
+      "triggers": ["api-gateway"],
+      "npmInstall": true,
+      "bundledDependencies": ["@aws-sdk/client-sesv2"]
+    },
+    "admin": {
+      "directory": "stridelux-admin-fn",
+      "awsFunctionName": "stridelux-admin-fn",
+      "handler": "index.handler",
+      "runtime": "nodejs22.x",
+      "description": "Admin dashboard — GET /admin/dashboard (aggregated stats), GET /admin/reports, GET /admin/users (returns customers[] and employees[]), POST/PUT/DELETE /admin/employees (also calls Cognito AdminCreateUser + AdminAddUserToGroup), GET/POST/PUT/DELETE /admin/coupons. Reads/writes stridelux-orders, stridelux-products, stridelux-users, stridelux-coupons. Requires COGNITO_USER_POOL_ID env var. Sends transactional emails via SES v2.",
+      "iamRole": "stridelux-admin-fn-role",
+      "triggers": ["api-gateway"],
+      "npmInstall": true,
+      "bundledDependencies": ["@aws-sdk/client-sesv2"],
+      "environmentVariables": {
+        "COGNITO_USER_POOL_ID": "${COGNITO_USER_POOL_ID}",
+        "FRONTEND_URL": "${FRONTEND_URL}",
+        "SES_FROM_ADDRESS": "${SES_FROM_ADDRESS}"
+      }
+    },
+    "users": {
+      "directory": "stridelux-users-fn",
+      "awsFunctionName": "stridelux-users-fn",
+      "handler": "index.handler",
+      "runtime": "nodejs22.x",
+      "description": "Customer profile self-service — GET/PUT /users/me, GET/POST/PUT/DELETE /users/me/addresses. Addresses stored as embedded List of Maps on the user record in stridelux-users (NOT a separate table). GET returns addresses newest-first (.reverse()). POST deduplicates by street+postalCode and caps at 5 addresses per user.",
+      "iamRole": "stridelux-users-fn-role",
+      "triggers": ["api-gateway"],
+      "npmInstall": false,
+      "bundledDependencies": []
+    },
+    "payments": {
+      "directory": "stridelux-payments-fn",
+      "awsFunctionName": "stridelux-payments-fn",
+      "handler": "index.handler",
+      "runtime": "nodejs22.x",
+      "description": "Stripe integration — POST /payments/checkout-session (public, no Cognito authorizer — manually decodes JWT from Authorization header for logged-in users), POST /payments/webhook (public, verified via Stripe signature), POST /coupons/validate (public). Server-side price recomputation via BatchGetItem on stridelux-products (never trusts body.total). Webhook updates order to processing/paid, decrements stockCount in stridelux-products. Sends order confirmation emails via SES v2. Reads/writes stridelux-orders, stridelux-coupons, stridelux-products.",
+      "iamRole": "stridelux-payments-fn-role",
+      "triggers": ["api-gateway"],
+      "npmInstall": true,
+      "bundledDependencies": ["stripe", "@aws-sdk/client-sesv2"],
+      "environmentVariables": {
+        "STRIPE_SECRET_KEY": "${STRIPE_SECRET_KEY}",
+        "STRIPE_WEBHOOK_SECRET": "${STRIPE_WEBHOOK_SECRET}",
+        "SES_FROM_ADDRESS": "${SES_FROM_ADDRESS}",
+        "FRONTEND_URL": "${FRONTEND_URL}"
+      }
+    },
+    "cart": {
+      "directory": "stridelux-cart-fn",
+      "awsFunctionName": "stridelux-cart-fn",
+      "handler": "index.handler",
+      "runtime": "nodejs22.x",
+      "description": "Cart and wishlist persistence — GET/POST /cart, PUT /cart/{productId}, DELETE /cart/{productId}, DELETE /cart (BatchWriteItem wipe for post-order clear), GET/POST /wishlist, DELETE /wishlist/{productId}. Uses stridelux-cart-wishlist table with composite key userId (PK) + itemId (SK). itemId format: CART#{productId}#{size} or WISHLIST#{productId}. Enriches responses with live product data via BatchGetItem on stridelux-products.",
+      "iamRole": "stridelux-cart-fn-role",
+      "triggers": ["api-gateway"],
+      "npmInstall": false,
+      "bundledDependencies": []
+    },
+    "post-confirmation": {
+      "directory": "stridelux-post-confirmation-fn",
+      "awsFunctionName": "stridelux-post-confirmation-fn",
+      "handler": "index.handler",
+      "runtime": "nodejs22.x",
+      "description": "Cognito trigger — NOT invoked via API Gateway. Attached to both Post Confirmation (PostConfirmation_ConfirmSignUp) and Post Authentication (PostAuthentication_Authentication) triggers on stridelux-user-pool. Post Confirmation: PutItem to stridelux-users with ConditionExpression attribute_not_exists(userId). Post Authentication: checks if record exists first — if missing creates complete record, if exists UpdateItem to sync name/phone/email from Cognito. Must always return the event object back to Cognito.",
+      "iamRole": "stridelux-post-confirmation-fn-role",
+      "triggers": ["cognito-post-confirmation", "cognito-post-authentication"],
+      "npmInstall": false,
+      "bundledDependencies": []
+    }
+  }
+}

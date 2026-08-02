@@ -1,0 +1,14 @@
+# Lambda function node_modules — installed fresh by CI (npm ci --production)
+lambdas/*/node_modules/
+
+# Deployment temp files and zips
+build/
+*.zip
+
+# Environment files
+.env
+.env*.local
+
+# Misc
+.DS_Store
+npm-debug.log*

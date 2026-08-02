@@ -1,0 +1,160 @@
+name: StrideLux Backend CI/CD
+
+# ─────────────────────────────────────────────────────────────
+# Triggers
+#   • Every push to main          → security scan + code quality + deploy
+#   • Every pull_request to main  → security scan + code quality only
+# ─────────────────────────────────────────────────────────────
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  NODE_VERSION: '20'
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
+jobs:
+  # ── Job 1: Security Scan ───────────────────────────────────
+  # Trivy scans Lambda source for CVEs, secrets, and misconfigs.
+  # CRITICAL findings with available fixes block deployment.
+  # ──────────────────────────────────────────────────────────
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Trivy scan — SARIF report
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          scanners: 'vuln,secret,misconfig'
+          severity: 'CRITICAL,HIGH,MEDIUM'
+          ignore-unfixed: true
+          skip-dirs: 'node_modules'
+
+      - name: Upload results to GitHub Security tab
+        if: always()
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+      - name: Trivy scan — CRITICAL gate
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'table'
+          scanners: 'vuln,secret,misconfig'
+          severity: 'CRITICAL'
+          ignore-unfixed: true
+          skip-dirs: 'node_modules'
+          exit-code: '1'
+
+  # ── Job 2: Code Quality ────────────────────────────────────
+  # Static analysis on Lambda source code.
+  #
+  # SonarCloud is active (free for public repos).
+  # SonarQube Community Edition block is ready but dormant —
+  # uncomment it and comment out SonarCloud when your
+  # self-hosted server is running. Both use SONAR_TOKEN;
+  # SonarQube additionally needs SONAR_HOST_URL.
+  # ──────────────────────────────────────────────────────────
+  code-quality:
+    name: Code Quality
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # full history required for blame and new-code detection
+
+      # ── SonarCloud (active) ──────────────────────────────────────────────────
+      # Setup: sonarcloud.io → Log in with GitHub → import this repo →
+      # copy the generated SONAR_TOKEN to Settings → Secrets → Actions.
+      # Update sonar-project.properties with your projectKey and organization.
+      - name: SonarCloud Scan
+        uses: SonarSource/sonarcloud-github-action@master
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}   # auto-provided, no setup needed
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}      # from sonarcloud.io
+
+      # ── SonarQube Community Edition (self-hosted — dormant) ─────────────────
+      # Uncomment when your EC2-hosted SonarQube server is running.
+      # Add SONAR_HOST_URL (e.g. http://your-ec2-ip:9000) to repo secrets.
+      # SONAR_TOKEN value comes from SonarQube server, not SonarCloud.
+      # Comment out the SonarCloud step above before enabling this.
+      #
+      # - name: SonarQube Scan
+      #   uses: SonarSource/sonarqube-scan-action@master
+      #   env:
+      #     SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+      #     SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+
+  # ── Job 3: Deploy Lambda Functions ────────────────────────
+  # Runs ONLY on push to main, AFTER security and quality pass.
+  # Detects which Lambda functions changed and deploys only those.
+  # ──────────────────────────────────────────────────────────
+  deploy-lambdas:
+    name: Deploy Lambda Functions
+    runs-on: ubuntu-latest
+    needs: [security-scan, code-quality]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2  # needed so git diff HEAD~1 HEAD works
+
+      - name: Set up Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Check for Lambda code changes
+        id: check_lambda
+        run: node scripts/check-lambda-changes.js
+        continue-on-error: true
+
+      - name: Configure AWS credentials
+        if: steps.check_lambda.outcome == 'success'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Deploy Lambda functions
+        if: steps.check_lambda.outcome == 'success'
+        run: node scripts/deploy-lambdas.js
+
+      - name: Write deployment summary
+        if: always()
+        env:
+          LAMBDA_OUTCOME: ${{ steps.check_lambda.outcome }}
+        run: |
+          if [ "$LAMBDA_OUTCOME" == "success" ]; then
+            echo "### Lambda deployment successful ✅" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "### Lambda deployment skipped ⏭️" >> $GITHUB_STEP_SUMMARY
+            echo "No Lambda code changes detected." >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| | |" >> $GITHUB_STEP_SUMMARY
+          echo "|---|---|" >> $GITHUB_STEP_SUMMARY
+          echo "| **Commit** | \`${{ github.sha }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Triggered by** | ${{ github.actor }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Time** | $(date -u '+%Y-%m-%d %H:%M UTC') |" >> $GITHUB_STEP_SUMMARY
