@@ -651,7 +651,7 @@ exports.handler = async (event) => {
       await cognitoClient.send(new AdminCreateUserCommand({
         UserPoolId: process.env.COGNITO_USER_POOL_ID,
         Username:   username,
-        TemporaryPassword: "Temp1234!",
+        TemporaryPassword: process.env.COGNITO_TEMP_PASSWORD,
         UserAttributes: [
           { Name: "email",          Value: email },
           { Name: "name",           Value: name },
